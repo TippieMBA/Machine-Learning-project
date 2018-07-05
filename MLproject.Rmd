@@ -1,0 +1,141 @@
+---
+title: "Machine Learning project"
+author: "Rajeev"
+date: "July 4, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Machine learning project overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, and predict the manner in which they did the exercise. This is the "classe" variable in the training set; we have used other variables to predict with. many variables contains lots of NA values, so we need to clean the data to ensure we are using right predictors and not putting unnecessary computation on the algorithms
+
+```{r, warning=FALSE,include=FALSE,cache=FALSE,message=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+setwd("C:/Data Science")
+```
+## Reading files into R environment
+```{r}
+if(!file.exists("data")){
+  dir.create("data")
+}
+trainpath <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testpath <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#Downloading files to the local directory
+download.file(trainpath,destfile = "training_set.csv")
+download.file(testpath,destfile = "testing_set.csv")
+
+#reading files into R environment
+trainset <- read.csv("training_set.csv", na.strings=c("NA","#DIV/0!",""))
+testset <- read.csv("testing_set.csv", na.strings=c("NA","#DIV/0!",""))
+```
+## Cleaning the data, and removing variables with very small variances
+```{r }
+org_training <- trainset[,nearZeroVar(trainset, saveMetrics=TRUE)$nzv==FALSE]
+qztest <- testset[,nearZeroVar(testset,saveMetrics=TRUE)$nzv==FALSE]
+```
+
+## Splitting dataset into training and test set
+```{r }
+inTrain <- createDataPartition(org_training$classe, p=0.7, list=FALSE)
+mod_training <- org_training[inTrain, ]
+mod_testing <- org_training[-inTrain, ]
+dim(mod_training) 
+dim(mod_testing)
+```
+## Removing columns where NA values are more than 70%; removing insigfinicant columns and making training and quiz data set columns same.
+```{r }
+training_temp <- mod_training
+for(i in 1:length(mod_training)) {
+  if( sum( is.na( mod_training[, i] ) ) /nrow(mod_training) >= .7) {
+    for(j in 1:length(training_temp)) {
+      if( length( grep(names(mod_training[i]), names(training_temp)[j]) ) == 1)  {
+        training_temp <- training_temp[ , -j]
+        }   
+    } 
+  }
+}
+mod_training <- training_temp
+dim(mod_training)
+dim(qztest)
+
+mod_training<-mod_training[,-1]
+qztest<-qztest[,-1]
+x1<-colnames(mod_training)
+mod_testing<-mod_testing[,x1]
+x1<-x1[-58]
+qztest<-qztest[,x1]
+setdiff(names(mod_training),names(qztest))
+```
+##Prediction with Random Forests
+While building model with random forest I identified that randomForst function from randomforst package is faster than train function with method "rf" in caret package hence using randomForst function.
+```{r }
+set.seed(19820104)
+modFitB1 <- randomForest(classe ~ ., data=mod_training)
+predictionrf <- predict(modFitB1, mod_testing, type = "class")
+cmrf <- confusionMatrix(predictionrf, mod_testing$classe)
+cmrf
+
+```
+##Prediction with Generalized Boosted Regression
+```{r }
+set.seed(19820104)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbmFit1 <- train(classe ~ ., data=mod_training, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+
+gbmFinMod1 <- gbmFit1$finalModel
+
+gbmPredTest <- predict(gbmFit1, newdata=mod_testing)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, mod_testing$classe)
+gbmAccuracyTest
+```
+##Classification tree
+```{r}
+fit_rpart <- train(classe ~ ., data = mod_training, method = "rpart", 
+                   trControl = trainControl(method = "cv", number = 5))
+print(fit_rpart, digits = 4)
+fancyRpartPlot(fit_rpart$finalModel)
+predict_rpart <- predict(fit_rpart, mod_testing)
+(conf_rpart <- confusionMatrix(mod_testing$classe, predict_rpart))
+
+```
+##accuracies of all three algorithms
+```{r}
+print("accuracy of random forest algorithm:") 
+cmrf$overall[[1]]
+print("accuracy of Generalized boosted algorithm:")
+gbmAccuracyTest$overall[[1]]
+print("accuracy of classification tree algorithm:") 
+conf_rpart$overall[[1]]
+```
+
+Randon forst is one of the most accurate algorithm, but for this algorithm, required computation power is high in general. Since data sets used in this project are not big hence computation power needed for random forest algorithm is managable .Using random forest algorithm to predict quiz test classe outcome.
+```{r}
+#Types of the quiz test data predictors and training data don't remain same due to multiple operations and assignment of column names from training data set to the quiz test dataset, hence assignment training data predictors class to the quiz test predictors
+for (i in 1:length(qztest) ) {
+  for(j in 1:length(mod_training)) {
+    if( length( grep(names(mod_training[i]), names(qztest)[j]) ) == 1)  {
+      class(qztest[j]) <- class(mod_training[i])
+    }      
+  }      
+}
+qztest <- rbind(mod_training[2, -58] , qztest)
+qztest <- qztest[-1,]
+
+predict(modFitB1, qztest)
+```
